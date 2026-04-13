@@ -9,29 +9,55 @@
   <body>
     <main class="shell">
       <section class="hero">
-        <div>
-          <p class="eyebrow">d-ml</p>
-          <h1>Analisis temporal y espectral para audio</h1>
+        <div class="hero-copy">
+          <p class="eyebrow">d-ml audio intelligence</p>
+          <h1>Frontend para analisis temporal y espectral</h1>
           <p class="lead">
-            Sube un sonido y obtén un resumen preparado para inspección humana,
-            trazabilidad técnica y futuros modelos de tendencias o anomalías.
+            Una interfaz pensada para operadores y usuarios finales: sube un audio,
+            revisa la visual principal, compara graficos tecnicos y conserva un
+            vector de features listo para tendencias y deteccion de anomalias.
           </p>
+          <div class="hero-points">
+            <span>Metadatos tecnicos</span>
+            <span>Insights listos para negocio</span>
+            <span>Visualizaciones comparables</span>
+          </div>
         </div>
-        <div class="hero-card">
-          <p class="card-label">Salida principal</p>
-          <p class="card-value">Dashboard + features</p>
+
+        <aside class="hero-card">
+          <p class="card-label">Salida recomendada</p>
+          <p class="card-value">Dashboard operacional</p>
           <p class="card-copy">
-            La API sigue pudiendo devolver imagen, pero ahora la respuesta JSON
-            incluye metadatos, métricas y múltiples visualizaciones.
+            El dashboard resume energia, espectro y evolucion temporal; debajo
+            quedan disponibles el resto de graficos y el JSON completo.
           </p>
-        </div>
+          <div class="card-stack">
+            <div>
+              <strong>GET /</strong>
+              <span>Interfaz de usuarios</span>
+            </div>
+            <div>
+              <strong>POST /scalogram</strong>
+              <span>Analisis programatico</span>
+            </div>
+          </div>
+        </aside>
       </section>
 
       <section class="panel upload-panel">
+        <div class="panel-head">
+          <div>
+            <p class="panel-kicker">Entrada</p>
+            <h2>Configura el analisis</h2>
+          </div>
+          <div class="panel-badge">JSON + imagenes + metrica</div>
+        </div>
+
         <form id="analysis-form">
-          <div class="field">
+          <div class="field file-field">
             <label for="audio_file">Archivo de audio</label>
             <input id="audio_file" name="audio_file" type="file" accept="audio/*" required />
+            <p id="file-hint" class="helper-text">Acepta cualquier formato soportado por `librosa`.</p>
           </div>
 
           <div class="grid">
@@ -42,6 +68,7 @@
                 <option value="mel_spectrogram">Mel spectrogram</option>
                 <option value="spectrum">Average spectrum</option>
                 <option value="rms_energy">RMS energy</option>
+                <option value="autocorrelation">Autocorrelation</option>
                 <option value="waveform">Waveform</option>
                 <option value="scalogram">Scalogram</option>
               </select>
@@ -81,19 +108,95 @@
       </section>
 
       <section id="results" class="results hidden">
-        <div class="section-head">
-          <h2>Resumen</h2>
-          <a id="download-primary" class="download-link" href="#" download="analysis.png">Descargar imagen principal</a>
+        <div class="summary-strip">
+          <article class="summary-card">
+            <p class="summary-label">Archivo</p>
+            <strong id="summary-file">Sin archivo</strong>
+            <span id="summary-size">0 KB</span>
+          </article>
+          <article class="summary-card">
+            <p class="summary-label">Duracion</p>
+            <strong id="summary-duration">0 s</strong>
+            <span id="summary-sample-rate">0 Hz</span>
+          </article>
+          <article class="summary-card">
+            <p class="summary-label">Frecuencia dominante</p>
+            <strong id="summary-dominant">0 Hz</strong>
+            <span id="summary-version">v0</span>
+          </article>
         </div>
 
-        <div id="metadata" class="metrics-grid"></div>
-        <div id="temporal" class="metrics-grid"></div>
-        <div id="spectral" class="metrics-grid"></div>
+        <section class="panel feature-panel">
+          <div class="panel-head">
+            <div>
+              <p class="panel-kicker">Lectura rapida</p>
+              <h2>Insights y reproduccion</h2>
+            </div>
+            <div class="panel-actions">
+              <a id="download-primary" class="download-link" href="#" download="analysis.png">Descargar imagen principal</a>
+              <button id="download-json" class="secondary-button" type="button">Descargar JSON</button>
+            </div>
+          </div>
 
-        <div class="section-head">
-          <h2>Visualizaciones</h2>
-        </div>
-        <div id="plots" class="plots-grid"></div>
+          <div class="feature-grid">
+            <div class="audio-card">
+              <p class="card-label">Preescucha</p>
+              <audio id="audio-player" controls preload="metadata"></audio>
+              <p id="audio-caption" class="helper-text">La reproduccion ayuda a contrastar lo que ves en las graficas.</p>
+            </div>
+
+            <div class="insights-card">
+              <p class="card-label">Interpretacion inicial</p>
+              <ul id="insights-list" class="insights-list"></ul>
+            </div>
+          </div>
+        </section>
+
+        <section class="results-layout">
+          <div class="results-main">
+            <section class="panel spotlight-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="panel-kicker">Visual principal</p>
+                  <h2 id="spotlight-title">Dashboard</h2>
+                </div>
+                <div class="panel-badge" id="spotlight-key">dashboard</div>
+              </div>
+              <p id="spotlight-description" class="spotlight-copy"></p>
+              <img id="spotlight-image" class="spotlight-image" alt="Visualizacion principal" />
+            </section>
+
+            <section class="panel">
+              <div class="section-head">
+                <h2>Visualizaciones complementarias</h2>
+              </div>
+              <div id="plots" class="plots-grid"></div>
+            </section>
+          </div>
+
+          <aside class="results-side">
+            <section class="panel">
+              <div class="section-head">
+                <h2>Metadatos</h2>
+              </div>
+              <div id="metadata" class="metrics-grid compact-grid"></div>
+            </section>
+
+            <section class="panel">
+              <div class="section-head">
+                <h2>Temporal</h2>
+              </div>
+              <div id="temporal" class="metrics-grid compact-grid"></div>
+            </section>
+
+            <section class="panel">
+              <div class="section-head">
+                <h2>Espectral</h2>
+              </div>
+              <div id="spectral" class="metrics-grid compact-grid"></div>
+            </section>
+          </aside>
+        </section>
       </section>
     </main>
 

@@ -8,6 +8,7 @@ import librosa
 import matplotlib
 import numpy as np
 import pywt
+from scipy.signal import find_peaks
 
 from app.core.config import settings
 
@@ -19,7 +20,7 @@ import matplotlib.pyplot as plt
 EPSILON = 1e-10
 ANALYSIS_FRAME_LENGTH = 2048
 ANALYSIS_HOP_LENGTH = 512
-ANALYSIS_VERSION = "2.0"
+ANALYSIS_VERSION = "2.1"
 
 
 @dataclass
@@ -65,6 +66,19 @@ class SpectralAnalysis:
     dominant_frequency_magnitude: float
     spectral_flux: SummaryStats
     top_spectral_peaks: list[SpectralPeak]
+
+
+@dataclass
+class AutocorrelationAnalysis:
+    strongest_peak_lag_samples: int | None
+    strongest_peak_lag_seconds: float | None
+    strongest_peak_value: float | None
+    second_peak_lag_samples: int | None
+    second_peak_lag_seconds: float | None
+    second_peak_value: float | None
+    peak_distance_samples: int | None
+    peak_distance_seconds: float | None
+    peak_count: int
 
 
 @dataclass
@@ -114,6 +128,7 @@ class ScalogramResult:
     scalogram_config: ScalogramConfig
     temporal_analysis: TemporalAnalysis
     spectral_analysis: SpectralAnalysis
+    autocorrelation_analysis: AutocorrelationAnalysis
     analysis_version: str
 
 
@@ -293,6 +308,31 @@ def _build_dashboard_plot(
     )
 
 
+def _build_autocorrelation_plot(
+    lag_seconds: np.ndarray,
+    autocorrelation: np.ndarray,
+    peak_indices: list[int],
+) -> PlotImage:
+    figure, axis = plt.subplots(figsize=(12, 3.8), dpi=160)
+    axis.plot(lag_seconds, autocorrelation, color="#8b5cf6", linewidth=1.2)
+    if peak_indices:
+        peak_x = lag_seconds[peak_indices]
+        peak_y = autocorrelation[peak_indices]
+        axis.scatter(peak_x, peak_y, color="#f97316", s=28, zorder=3)
+    axis.set_title("Autocorrelation")
+    axis.set_xlabel("Lag (s)")
+    axis.set_ylabel("Correlation")
+    axis.set_xlim(0, float(lag_seconds[-1]) if len(lag_seconds) else 0)
+    axis.grid(alpha=0.2)
+    return PlotImage(
+        key="autocorrelation",
+        title="Autocorrelation",
+        description="Self-similarity across lags, useful for periodicity and spacing between repeated patterns.",
+        media_type="image/png",
+        image_bytes=_render_figure(figure),
+    )
+
+
 def _serialize_temporal_analysis(analysis: TemporalAnalysis) -> dict[str, object]:
     return {
         "rms": asdict(analysis.rms),
@@ -322,6 +362,10 @@ def _serialize_spectral_analysis(analysis: SpectralAnalysis) -> dict[str, object
     }
 
 
+def _serialize_autocorrelation_analysis(analysis: AutocorrelationAnalysis) -> dict[str, object]:
+    return asdict(analysis)
+
+
 def serialize_result(result: ScalogramResult, *, include_images: bool = True) -> dict[str, object]:
     payload: dict[str, object] = {
         "analysis_version": result.analysis_version,
@@ -330,6 +374,7 @@ def serialize_result(result: ScalogramResult, *, include_images: bool = True) ->
         "scalogram_config": asdict(result.scalogram_config),
         "temporal_analysis": _serialize_temporal_analysis(result.temporal_analysis),
         "spectral_analysis": _serialize_spectral_analysis(result.spectral_analysis),
+        "autocorrelation_analysis": _serialize_autocorrelation_analysis(result.autocorrelation_analysis),
     }
 
     if include_images:
@@ -458,6 +503,38 @@ def build_scalogram(
     mel_db = librosa.power_to_db(mel_spectrogram, ref=np.max)
     rms_times = _seconds_axis(len(rms), effective_sample_rate, ANALYSIS_HOP_LENGTH)
 
+    autocorrelation = librosa.autocorrelate(waveform)
+    autocorrelation = autocorrelation[: min(len(autocorrelation), effective_sample_rate * 2)]
+    if autocorrelation.size == 0:
+        autocorrelation = np.array([1.0], dtype=float)
+    autocorrelation = autocorrelation / (np.max(np.abs(autocorrelation)) + EPSILON)
+    autocorrelation_lags = np.arange(len(autocorrelation))
+    autocorrelation_seconds = autocorrelation_lags / effective_sample_rate
+
+    positive_autocorrelation = autocorrelation[1:] if autocorrelation.size > 1 else np.array([], dtype=float)
+    detected_peaks = np.array([], dtype=int)
+    if positive_autocorrelation.size > 2:
+        detected_peaks, _ = find_peaks(
+            positive_autocorrelation,
+            prominence=0.05,
+            distance=max(1, int(effective_sample_rate * 0.005)),
+        )
+    detected_peaks = detected_peaks + 1 if detected_peaks.size else detected_peaks
+    strongest_peak_indices = sorted(
+        detected_peaks.tolist(),
+        key=lambda idx: float(autocorrelation[idx]),
+        reverse=True,
+    )[:2]
+
+    strongest_peak_lag_samples = strongest_peak_indices[0] if len(strongest_peak_indices) >= 1 else None
+    second_peak_lag_samples = strongest_peak_indices[1] if len(strongest_peak_indices) >= 2 else None
+
+    peak_distance_samples = None
+    peak_distance_seconds = None
+    if strongest_peak_lag_samples is not None and second_peak_lag_samples is not None:
+        peak_distance_samples = abs(second_peak_lag_samples - strongest_peak_lag_samples)
+        peak_distance_seconds = float(peak_distance_samples / effective_sample_rate)
+
     plots = {
         "dashboard": _build_dashboard_plot(
             waveform,
@@ -474,11 +551,16 @@ def build_scalogram(
         "spectrum": _build_spectrum_plot(spectrum_frequencies, average_spectrum),
         "mel_spectrogram": _build_mel_plot(mel_db, effective_sample_rate, ANALYSIS_HOP_LENGTH),
         "scalogram": _build_scalogram_plot(power, frequencies, duration_seconds, selected_colormap),
+        "autocorrelation": _build_autocorrelation_plot(
+            autocorrelation_seconds,
+            autocorrelation,
+            strongest_peak_indices,
+        ),
     }
 
     if visualization not in plots:
         raise ValueError(
-            "Invalid visualization. Use one of: dashboard, waveform, rms_energy, spectrum, mel_spectrogram, scalogram."
+            "Invalid visualization. Use one of: dashboard, waveform, rms_energy, spectrum, mel_spectrogram, scalogram, autocorrelation."
         )
 
     temporal_analysis = TemporalAnalysis(
@@ -506,6 +588,34 @@ def build_scalogram(
         top_spectral_peaks=top_spectral_peaks,
     )
 
+    autocorrelation_analysis = AutocorrelationAnalysis(
+        strongest_peak_lag_samples=int(strongest_peak_lag_samples) if strongest_peak_lag_samples is not None else None,
+        strongest_peak_lag_seconds=(
+            float(strongest_peak_lag_samples / effective_sample_rate)
+            if strongest_peak_lag_samples is not None
+            else None
+        ),
+        strongest_peak_value=(
+            float(autocorrelation[strongest_peak_lag_samples])
+            if strongest_peak_lag_samples is not None
+            else None
+        ),
+        second_peak_lag_samples=int(second_peak_lag_samples) if second_peak_lag_samples is not None else None,
+        second_peak_lag_seconds=(
+            float(second_peak_lag_samples / effective_sample_rate)
+            if second_peak_lag_samples is not None
+            else None
+        ),
+        second_peak_value=(
+            float(autocorrelation[second_peak_lag_samples])
+            if second_peak_lag_samples is not None
+            else None
+        ),
+        peak_distance_samples=int(peak_distance_samples) if peak_distance_samples is not None else None,
+        peak_distance_seconds=peak_distance_seconds,
+        peak_count=int(detected_peaks.size),
+    )
+
     metadata = AudioMetadata(
         sample_rate=int(effective_sample_rate),
         original_sample_rate=int(original_sample_rate),
@@ -530,5 +640,6 @@ def build_scalogram(
         ),
         temporal_analysis=temporal_analysis,
         spectral_analysis=spectral_analysis,
+        autocorrelation_analysis=autocorrelation_analysis,
         analysis_version=ANALYSIS_VERSION,
     )
