@@ -6,7 +6,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import JSONResponse, Response
 
 from app.core.config import settings
-from app.services.scalogram import build_scalogram
+from app.services.scalogram import build_scalogram, serialize_result
 
 
 router = APIRouter(prefix="/scalogram", tags=["scalogram"])
@@ -25,6 +25,7 @@ async def create_scalogram(
     width_min: int | None = Form(default=None),
     width_max: int | None = Form(default=None),
     colormap: str | None = Form(default=None),
+    visualization: str = Form(default="dashboard"),
     output: str = Form(default="image"),
 ):
     if output not in {"image", "json"}:
@@ -54,6 +55,7 @@ async def create_scalogram(
             width_min=width_min,
             width_max=width_max,
             colormap=colormap,
+            visualization=visualization,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -64,29 +66,21 @@ async def create_scalogram(
         ) from exc
 
     if output == "json":
-        return JSONResponse(
-            {
-                "content_type": "image/png",
-                "filename": f"{audio_file.filename or 'scalogram'}.png",
-                "sample_rate": result.sample_rate,
-                "duration_seconds": result.duration_seconds,
-                "sample_count": result.sample_count,
-                "wavelet": result.wavelet,
-                "width_min": result.width_min,
-                "width_max": result.width_max,
-                "colormap": result.colormap,
-                "image_base64": base64.b64encode(result.image_bytes).decode("ascii"),
-                "encoding": "base64",
-            }
-        )
+        payload = serialize_result(result, include_images=True)
+        payload["content_type"] = "image/png"
+        payload["filename"] = f"{audio_file.filename or 'analysis'}.png"
+        payload["image_base64"] = base64.b64encode(result.primary_image.image_bytes).decode("ascii")
+        payload["encoding"] = "base64"
+        return JSONResponse(payload)
 
     return Response(
-        content=result.image_bytes,
+        content=result.primary_image.image_bytes,
         media_type="image/png",
         headers={
-            "Content-Disposition": f'inline; filename="{audio_file.filename or "scalogram"}.png"',
-            "X-Scalogram-Sample-Rate": str(result.sample_rate),
-            "X-Scalogram-Duration": str(result.duration_seconds),
-            "X-Scalogram-Wavelet": result.wavelet,
+            "Content-Disposition": f'inline; filename="{audio_file.filename or visualization}.png"',
+            "X-Analysis-Sample-Rate": str(result.metadata.sample_rate),
+            "X-Analysis-Duration": str(result.metadata.duration_seconds),
+            "X-Analysis-Visualization": result.primary_image.key,
+            "X-Analysis-Wavelet": result.scalogram_config.wavelet,
         },
     )

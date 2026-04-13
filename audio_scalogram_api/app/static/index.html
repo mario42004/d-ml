@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Audio Analysis API</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">d-ml</p>
+          <h1>Analisis temporal y espectral para audio</h1>
+          <p class="lead">
+            Sube un sonido y obtén un resumen preparado para inspección humana,
+            trazabilidad técnica y futuros modelos de tendencias o anomalías.
+          </p>
+        </div>
+        <div class="hero-card">
+          <p class="card-label">Salida principal</p>
+          <p class="card-value">Dashboard + features</p>
+          <p class="card-copy">
+            La API sigue pudiendo devolver imagen, pero ahora la respuesta JSON
+            incluye metadatos, métricas y múltiples visualizaciones.
+          </p>
+        </div>
+      </section>
+
+      <section class="panel upload-panel">
+        <form id="analysis-form">
+          <div class="field">
+            <label for="audio_file">Archivo de audio</label>
+            <input id="audio_file" name="audio_file" type="file" accept="audio/*" required />
+          </div>
+
+          <div class="grid">
+            <div class="field">
+              <label for="visualization">Visualizacion principal</label>
+              <select id="visualization" name="visualization">
+                <option value="dashboard">Dashboard</option>
+                <option value="mel_spectrogram">Mel spectrogram</option>
+                <option value="spectrum">Average spectrum</option>
+                <option value="rms_energy">RMS energy</option>
+                <option value="waveform">Waveform</option>
+                <option value="scalogram">Scalogram</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label for="sample_rate">Frecuencia de muestreo</label>
+              <input id="sample_rate" name="sample_rate" type="number" min="8000" step="1" placeholder="22050" />
+            </div>
+
+            <div class="field">
+              <label for="wavelet">Wavelet</label>
+              <input id="wavelet" name="wavelet" type="text" placeholder="morl" />
+            </div>
+
+            <div class="field">
+              <label for="colormap">Mapa de color</label>
+              <input id="colormap" name="colormap" type="text" placeholder="magma" />
+            </div>
+
+            <div class="field">
+              <label for="width_min">Width min</label>
+              <input id="width_min" name="width_min" type="number" min="1" step="1" placeholder="1" />
+            </div>
+
+            <div class="field">
+              <label for="width_max">Width max</label>
+              <input id="width_max" name="width_max" type="number" min="2" step="1" placeholder="128" />
+            </div>
+          </div>
+
+          <div class="actions">
+            <button id="submit-button" type="submit">Analizar audio</button>
+            <p id="status" class="status">Esperando archivo.</p>
+          </div>
+        </form>
+      </section>
+
+      <section id="results" class="results hidden">
+        <div class="section-head">
+          <h2>Resumen</h2>
+          <a id="download-primary" class="download-link" href="#" download="analysis.png">Descargar imagen principal</a>
+        </div>
+
+        <div id="metadata" class="metrics-grid"></div>
+        <div id="temporal" class="metrics-grid"></div>
+        <div id="spectral" class="metrics-grid"></div>
+
+        <div class="section-head">
+          <h2>Visualizaciones</h2>
+        </div>
+        <div id="plots" class="plots-grid"></div>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
