@@ -2,8 +2,6 @@ name: Audio API CI
 
 on:
   push:
-    branches:
-      - main
     paths:
       - ".github/workflows/audio-api-ci.yml"
       - "audio_scalogram_api/**"
