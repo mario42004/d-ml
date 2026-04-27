@@ -271,7 +271,7 @@ form.addEventListener("submit", async (event) => {
   formData.set("output", "json");
 
   try {
-    const response = await fetch("/scalogram", {
+    const response = await fetch("/audioanalisys", {
       method: "POST",
       body: formData,
     });

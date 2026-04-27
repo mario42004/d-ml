@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     app_port: int = 8001
 
     max_upload_size_mb: int = 25
-    max_audio_duration_seconds: int = 300
+    max_audio_duration_seconds: int = 20
     default_sample_rate: int = 22050
     default_wavelet: str = "morl"
     default_width_min: int = 1

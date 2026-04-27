@@ -5,20 +5,28 @@ import base64
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import JSONResponse, Response
 
+from app.analysis_engine import run_analysis_engine
 from app.core.config import settings
 from app.services.scalogram import build_scalogram, serialize_result
 
 
-router = APIRouter(prefix="/scalogram", tags=["scalogram"])
+router = APIRouter(tags=["audioanalisys"])
 
 
 @router.post(
-    "",
+    "/audioanalisys",
     responses={
         200: {"content": {"image/png": {}}},
     },
 )
-async def create_scalogram(
+@router.post(
+    "/scalogram",
+    include_in_schema=False,
+    responses={
+        200: {"content": {"image/png": {}}},
+    },
+)
+async def create_audioanalisys(
     audio_file: UploadFile = File(...),
     sample_rate: int | None = Form(default=None),
     wavelet: str | None = Form(default=None),
@@ -67,6 +75,16 @@ async def create_scalogram(
 
     if output == "json":
         payload = serialize_result(result, include_images=True)
+        payload["analysis_engine"] = run_analysis_engine(
+            audio_input=contents,
+            sample_rate=sample_rate,
+            original_format=(
+                audio_file.filename.rsplit(".", 1)[-1]
+                if audio_file.filename and "." in audio_file.filename
+                else None
+            ),
+            filename=audio_file.filename,
+        )
         payload["content_type"] = "image/png"
         payload["filename"] = f"{audio_file.filename or 'analysis'}.png"
         payload["image_base64"] = base64.b64encode(result.primary_image.image_bytes).decode("ascii")
