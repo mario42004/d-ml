@@ -45,15 +45,16 @@ Campos opcionales:
 
 `output=json` devuelve:
 
-- metadatos del audio y del analisis
-- metricas temporales agregadas
-- metricas espectrales agregadas
-- `analysis_engine` con validacion, normalizacion a 16 kHz, framing y metricas de calidad
+- version del analisis y visualizacion principal
+- `metricas` como bloque canonico unificado
 - la imagen principal en `base64`
 - un conjunto de graficos tecnicos adicionales en `base64`
 
-La clave `analysis_engine` sigue la Fase 0 del documento maestro de Audio Health Research. En modo
-normal no devuelve audio bruto, matrices grandes, espectrogramas completos ni artefactos pesados.
+La clave `metricas` agrupa calidad, energia, estructura temporal, autocorrelacion,
+espectro, bandas, cepstral y tiempo-frecuencia. No incluye metadatos del archivo,
+configuracion de visualizacion ni detalles operativos de framing. Internamente la API usa
+`analysis_engine`, pero la respuesta publica normal no expone audio bruto, matrices grandes,
+espectrogramas completos, features por frame ni artefactos pesados.
 
 Regla operativa actual:
 
@@ -61,12 +62,31 @@ Regla operativa actual:
 - procesamiento interno por frames de 5 segundos sin solape
 - los frames son solo una estrategia de calculo
 - la respuesta normal expone metricas agregadas de todo el audio, no metricas por frame
-- Fase 3 añade `spectral_summary` compacto: centroide, bandwidth, rolloff, flatness,
+- Fase 3 alimenta metricas espectrales compactas: centroide, bandwidth, rolloff, flatness,
   contraste, flux, frecuencia dominante, energia por bandas low/mid/high y PSD resumida
-- Fase 4 añade `cepstral_summary` compacto: MFCC mean/std, delta MFCC opcional,
+- Fase 4 alimenta metricas cepstrales compactas: MFCC mean/std, delta MFCC opcional,
   envolvente espectral resumida y features de voz solo si se activan por configuracion
-- Fase 5 añade `time_frequency_summary` opcional y desactivado por defecto; cuando se
+- Fase 5 alimenta metricas tiempo-frecuencia opcionales y desactivadas por defecto; cuando se
   activa devuelve solo escala/entropia/concentracion/modulacion compacta, nunca matrices CWT
+
+Forma resumida del JSON publico:
+
+```json
+{
+  "analysis_version": "2.1",
+  "primary_visualization": "dashboard",
+  "metricas": {
+    "version_esquema": "1.0",
+    "politica": "metricas_canonicas_unificadas",
+    "grupos": []
+  },
+  "plots": {},
+  "content_type": "image/png",
+  "filename": "analysis.png",
+  "image_base64": "...",
+  "encoding": "base64"
+}
+```
 
 ## Ejemplo con curl
 

@@ -13,15 +13,6 @@ from app.services.scalogram import build_scalogram, serialize_result
 router = APIRouter(tags=["audioanalisys"])
 
 
-def _get_nested(source: dict[str, object], path: list[str]) -> object | None:
-    value: object = source
-    for segment in path:
-        if not isinstance(value, dict) or segment not in value:
-            return None
-        value = value[segment]
-    return value
-
-
 def _metric(
     *,
     key: str,
@@ -32,31 +23,29 @@ def _metric(
     description: str,
 ) -> dict[str, object]:
     return {
-        "key": key,
-        "label": label,
-        "value": value,
-        "unit": unit,
-        "source": source,
-        "description": description,
+        "clave": key,
+        "etiqueta": label,
+        "valor": value,
+        "unidad": unit,
+        "fuente": source,
+        "descripcion": description,
     }
 
 
 def _group(key: str, label: str, metrics: list[dict[str, object]]) -> dict[str, object]:
     return {
-        "key": key,
-        "label": label,
-        "metrics": [metric for metric in metrics if metric["value"] is not None],
+        "clave": key,
+        "etiqueta": label,
+        "metricas": [metric for metric in metrics if metric["valor"] is not None],
     }
 
 
-def build_coherent_metrics(
+def build_metricas(
     *,
     legacy_payload: dict[str, object],
     engine_payload: dict[str, object],
 ) -> dict[str, object]:
     quality = engine_payload.get("quality") if isinstance(engine_payload.get("quality"), dict) else {}
-    input_audio = engine_payload.get("input_audio") if isinstance(engine_payload.get("input_audio"), dict) else {}
-    framing = engine_payload.get("framing") if isinstance(engine_payload.get("framing"), dict) else {}
     global_features = (
         engine_payload.get("global_features") if isinstance(engine_payload.get("global_features"), dict) else {}
     )
@@ -80,68 +69,24 @@ def build_coherent_metrics(
     mfcc_mean = cepstral.get("mfcc_mean") if isinstance(cepstral.get("mfcc_mean"), list) else []
     mfcc_std = cepstral.get("mfcc_std") if isinstance(cepstral.get("mfcc_std"), list) else []
     delta_mfcc_mean = cepstral.get("delta_mfcc_mean") if isinstance(cepstral.get("delta_mfcc_mean"), list) else []
+    delta_mfcc_std = cepstral.get("delta_mfcc_std") if isinstance(cepstral.get("delta_mfcc_std"), list) else []
+    spectral_envelope = (
+        cepstral.get("spectral_envelope_summary")
+        if isinstance(cepstral.get("spectral_envelope_summary"), dict)
+        else {}
+    )
+    psd_summary = (
+        spectral.get("power_spectral_density_summary")
+        if isinstance(spectral.get("power_spectral_density_summary"), dict)
+        else {}
+    )
+    modulation_summary = (
+        time_frequency.get("modulation_energy_summary")
+        if isinstance(time_frequency.get("modulation_energy_summary"), dict)
+        else {}
+    )
 
     groups = [
-        _group(
-            "audio_context",
-            "Audio y contexto de analisis",
-            [
-                _metric(
-                    key="duration_seconds",
-                    label="Duracion",
-                    value=input_audio.get("duration_seconds") or quality.get("duration_seconds"),
-                    unit="s",
-                    source="analysis_engine.input_audio.duration_seconds",
-                    description="Duracion total del audio analizado.",
-                ),
-                _metric(
-                    key="sample_rate_original_hz",
-                    label="Sample rate original",
-                    value=quality.get("sample_rate_original"),
-                    unit="Hz",
-                    source="analysis_engine.quality.sample_rate_original",
-                    description="Frecuencia de muestreo detectada en el archivo original.",
-                ),
-                _metric(
-                    key="sample_rate_analysis_hz",
-                    label="Sample rate de analisis",
-                    value=input_audio.get("internal_sample_rate") or quality.get("sample_rate_internal"),
-                    unit="Hz",
-                    source="analysis_engine.input_audio.internal_sample_rate",
-                    description="Frecuencia usada por el motor canonico de analisis.",
-                ),
-                _metric(
-                    key="channels_original",
-                    label="Canales originales",
-                    value=input_audio.get("channels_original") or quality.get("channels_original"),
-                    source="analysis_engine.input_audio.channels_original",
-                    description="Numero de canales detectados antes de convertir internamente a mono.",
-                ),
-                _metric(
-                    key="frame_count",
-                    label="Frames internos",
-                    value=framing.get("frame_count"),
-                    source="analysis_engine.framing.frame_count",
-                    description="Cantidad de frames usados para agregacion interna.",
-                ),
-                _metric(
-                    key="frame_duration_seconds",
-                    label="Duracion de frame",
-                    value=framing.get("frame_duration_seconds"),
-                    unit="s",
-                    source="analysis_engine.framing.frame_duration_seconds",
-                    description="Duracion objetivo de cada frame interno.",
-                ),
-                _metric(
-                    key="max_audio_duration_seconds",
-                    label="Duracion maxima admitida",
-                    value=quality.get("max_allowed_duration_seconds"),
-                    unit="s",
-                    source="analysis_engine.quality.max_allowed_duration_seconds",
-                    description="Limite de duracion aplicado por la API.",
-                ),
-            ],
-        ),
         _group(
             "signal_quality",
             "Calidad de senal",
@@ -169,6 +114,14 @@ def build_coherent_metrics(
                     description="Proporcion de muestras por debajo del umbral de energia.",
                 ),
                 _metric(
+                    key="active_ratio",
+                    label="Actividad",
+                    value=quality.get("active_ratio"),
+                    unit="ratio",
+                    source="analysis_engine.quality.active_ratio",
+                    description="Proporcion de muestras con actividad util de senal.",
+                ),
+                _metric(
                     key="silence_frame_ratio",
                     label="Silencio por frames",
                     value=temporal.get("silence_frame_ratio"),
@@ -185,11 +138,33 @@ def build_coherent_metrics(
                     description="Proporcion de muestras cercanas al maximo digital.",
                 ),
                 _metric(
+                    key="snr_estimate",
+                    label="SNR estimado",
+                    value=quality.get("snr_estimate"),
+                    unit="dB",
+                    source="analysis_engine.quality.snr_estimate",
+                    description="Estimacion relativa de senal frente a piso de ruido.",
+                ),
+                _metric(
+                    key="estimated_noise_floor",
+                    label="Piso de ruido estimado",
+                    value=quality.get("estimated_noise_floor"),
+                    source="analysis_engine.quality.estimated_noise_floor",
+                    description="Percentil bajo de amplitud usado como aproximacion del ruido de fondo.",
+                ),
+                _metric(
                     key="dc_offset",
                     label="DC offset",
                     value=quality.get("dc_offset"),
                     source="analysis_engine.quality.dc_offset",
                     description="Desplazamiento medio de la forma de onda.",
+                ),
+                _metric(
+                    key="mean_amplitude",
+                    label="Amplitud media",
+                    value=quality.get("mean_amplitude"),
+                    source="analysis_engine.quality.mean_amplitude",
+                    description="Amplitud absoluta media del audio normalizado internamente.",
                 ),
             ],
         ),
@@ -203,6 +178,13 @@ def build_coherent_metrics(
                     value=basic_features.get("rms_mean"),
                     source="analysis_engine.global_features.basic_features.rms_mean",
                     description="Energia RMS media agregada del audio completo.",
+                ),
+                _metric(
+                    key="rms_std",
+                    label="RMS desviacion",
+                    value=basic_features.get("rms_std"),
+                    source="analysis_engine.global_features.basic_features.rms_std",
+                    description="Variabilidad de energia RMS agregada.",
                 ),
                 _metric(
                     key="rms_min",
@@ -219,6 +201,43 @@ def build_coherent_metrics(
                     description="Energia RMS maxima observada.",
                 ),
                 _metric(
+                    key="rms_median",
+                    label="RMS mediano",
+                    value=basic_features.get("rms_median"),
+                    source="analysis_engine.global_features.basic_features.rms_median",
+                    description="Mediana de energia RMS agregada.",
+                ),
+                _metric(
+                    key="short_time_energy_mean",
+                    label="Energia corta media",
+                    value=basic_features.get("short_time_energy_mean"),
+                    source="analysis_engine.global_features.basic_features.short_time_energy_mean",
+                    description="Energia media calculada en ventanas cortas.",
+                ),
+                _metric(
+                    key="short_time_energy_std",
+                    label="Energia corta desviacion",
+                    value=basic_features.get("short_time_energy_std"),
+                    source="analysis_engine.global_features.basic_features.short_time_energy_std",
+                    description="Variabilidad de energia en ventanas cortas.",
+                ),
+                _metric(
+                    key="zero_crossing_rate_mean",
+                    label="Cruces por cero medios",
+                    value=basic_features.get("zero_crossing_rate_mean"),
+                    unit="ratio",
+                    source="analysis_engine.global_features.basic_features.zero_crossing_rate_mean",
+                    description="Tasa media de cambios de signo de la senal.",
+                ),
+                _metric(
+                    key="zero_crossing_rate_std",
+                    label="Cruces por cero desviacion",
+                    value=basic_features.get("zero_crossing_rate_std"),
+                    unit="ratio",
+                    source="analysis_engine.global_features.basic_features.zero_crossing_rate_std",
+                    description="Variabilidad de la tasa de cruces por cero.",
+                ),
+                _metric(
                     key="peak_amplitude",
                     label="Pico de amplitud",
                     value=quality.get("peak_amplitude"),
@@ -233,12 +252,34 @@ def build_coherent_metrics(
                     description="Relacion entre pico y energia RMS.",
                 ),
                 _metric(
+                    key="peak_count",
+                    label="Picos de amplitud",
+                    value=basic_features.get("peak_count"),
+                    source="analysis_engine.global_features.basic_features.peak_count",
+                    description="Cantidad agregada de picos relevantes de amplitud.",
+                ),
+                _metric(
+                    key="dynamic_range_db",
+                    label="Rango dinamico",
+                    value=basic_features.get("dynamic_range_db"),
+                    unit="dB",
+                    source="analysis_engine.global_features.basic_features.dynamic_range_db",
+                    description="Diferencia en dB entre zonas de baja y alta energia RMS.",
+                ),
+                _metric(
                     key="active_duration_seconds",
                     label="Duracion activa",
                     value=basic_features.get("active_duration_seconds"),
                     unit="s",
                     source="analysis_engine.global_features.basic_features.active_duration_seconds",
                     description="Tiempo estimado con actividad util de senal.",
+                ),
+                _metric(
+                    key="energy_entropy",
+                    label="Entropia de energia",
+                    value=basic_features.get("energy_entropy"),
+                    source="analysis_engine.global_features.basic_features.energy_entropy",
+                    description="Dispersion temporal de la energia agregada.",
                 ),
             ],
         ),
@@ -369,12 +410,28 @@ def build_coherent_metrics(
                     description="Centro de masa espectral medio.",
                 ),
                 _metric(
+                    key="spectral_centroid_std_hz",
+                    label="Centroide espectral desviacion",
+                    value=spectral.get("spectral_centroid_std"),
+                    unit="Hz",
+                    source="analysis_engine.spectral_summary.spectral_centroid_std",
+                    description="Variabilidad del centro de masa espectral.",
+                ),
+                _metric(
                     key="spectral_bandwidth_mean_hz",
                     label="Ancho de banda espectral medio",
                     value=spectral.get("spectral_bandwidth_mean"),
                     unit="Hz",
                     source="analysis_engine.spectral_summary.spectral_bandwidth_mean",
                     description="Dispersion media de energia alrededor del centroide.",
+                ),
+                _metric(
+                    key="spectral_bandwidth_std_hz",
+                    label="Ancho de banda espectral desviacion",
+                    value=spectral.get("spectral_bandwidth_std"),
+                    unit="Hz",
+                    source="analysis_engine.spectral_summary.spectral_bandwidth_std",
+                    description="Variabilidad de la dispersion espectral.",
                 ),
                 _metric(
                     key="spectral_rolloff_85_mean_hz",
@@ -408,11 +465,55 @@ def build_coherent_metrics(
                     description="Cambio medio del espectro a lo largo del tiempo.",
                 ),
                 _metric(
+                    key="spectral_contrast_mean",
+                    label="Contraste espectral",
+                    value=spectral.get("spectral_contrast_mean"),
+                    unit="dB",
+                    source="analysis_engine.spectral_summary.spectral_contrast_mean",
+                    description="Separacion media entre valles y picos espectrales.",
+                ),
+                _metric(
+                    key="dominant_power",
+                    label="Potencia dominante",
+                    value=spectral.get("dominant_power"),
+                    source="analysis_engine.spectral_summary.dominant_power",
+                    description="Potencia asociada a la frecuencia dominante.",
+                ),
+                _metric(
                     key="band_energy_entropy",
                     label="Entropia de bandas",
                     value=spectral.get("band_energy_entropy"),
                     source="analysis_engine.spectral_summary.band_energy_entropy",
                     description="Distribucion de energia entre bandas.",
+                ),
+                _metric(
+                    key="psd_total_power",
+                    label="PSD potencia total",
+                    value=psd_summary.get("total_power"),
+                    source="analysis_engine.spectral_summary.power_spectral_density_summary.total_power",
+                    description="Potencia total resumida de la densidad espectral.",
+                ),
+                _metric(
+                    key="psd_mean_power",
+                    label="PSD potencia media",
+                    value=psd_summary.get("mean_power"),
+                    source="analysis_engine.spectral_summary.power_spectral_density_summary.mean_power",
+                    description="Potencia media resumida de la densidad espectral.",
+                ),
+                _metric(
+                    key="psd_max_power",
+                    label="PSD potencia maxima",
+                    value=psd_summary.get("max_power"),
+                    source="analysis_engine.spectral_summary.power_spectral_density_summary.max_power",
+                    description="Potencia maxima resumida de la densidad espectral.",
+                ),
+                _metric(
+                    key="psd_max_power_frequency_hz",
+                    label="PSD frecuencia de potencia maxima",
+                    value=psd_summary.get("max_power_frequency"),
+                    unit="Hz",
+                    source="analysis_engine.spectral_summary.power_spectral_density_summary.max_power_frequency",
+                    description="Frecuencia asociada a la maxima potencia PSD resumida.",
                 ),
             ],
         ),
@@ -480,6 +581,44 @@ def build_coherent_metrics(
                     )
                     for index, value in enumerate(delta_mfcc_mean)
                 ],
+                *[
+                    _metric(
+                        key=f"delta_mfcc_{index}_std",
+                        label=f"Delta MFCC {index} std",
+                        value=value,
+                        source=f"analysis_engine.cepstral_summary.delta_mfcc_std.{index}",
+                        description="Variabilidad del cambio del coeficiente cepstral.",
+                    )
+                    for index, value in enumerate(delta_mfcc_std)
+                ],
+                _metric(
+                    key="spectral_envelope_mean_log_energy",
+                    label="Envolvente espectral energia log media",
+                    value=spectral_envelope.get("mean_log_energy"),
+                    source="analysis_engine.cepstral_summary.spectral_envelope_summary.mean_log_energy",
+                    description="Energia log media de la envolvente espectral.",
+                ),
+                _metric(
+                    key="spectral_envelope_std_log_energy",
+                    label="Envolvente espectral energia log desviacion",
+                    value=spectral_envelope.get("std_log_energy"),
+                    source="analysis_engine.cepstral_summary.spectral_envelope_summary.std_log_energy",
+                    description="Variabilidad de energia log en la envolvente espectral.",
+                ),
+                _metric(
+                    key="spectral_envelope_min_log_energy",
+                    label="Envolvente espectral energia log minima",
+                    value=spectral_envelope.get("min_log_energy"),
+                    source="analysis_engine.cepstral_summary.spectral_envelope_summary.min_log_energy",
+                    description="Energia log minima de la envolvente espectral.",
+                ),
+                _metric(
+                    key="spectral_envelope_max_log_energy",
+                    label="Envolvente espectral energia log maxima",
+                    value=spectral_envelope.get("max_log_energy"),
+                    source="analysis_engine.cepstral_summary.spectral_envelope_summary.max_log_energy",
+                    description="Energia log maxima de la envolvente espectral.",
+                ),
             ],
         ),
         _group(
@@ -507,25 +646,95 @@ def build_coherent_metrics(
                     source="analysis_engine.time_frequency_summary.reason",
                     description="Motivo tecnico cuando el modulo esta deshabilitado o falla.",
                 ),
+                _metric(
+                    key="wavelet_entropy",
+                    label="Entropia wavelet",
+                    value=time_frequency.get("wavelet_entropy"),
+                    source="analysis_engine.time_frequency_summary.wavelet_entropy",
+                    description="Dispersion de energia entre escalas wavelet.",
+                ),
+                _metric(
+                    key="time_frequency_concentration",
+                    label="Concentracion tiempo-frecuencia",
+                    value=time_frequency.get("time_frequency_concentration"),
+                    unit="ratio",
+                    source="analysis_engine.time_frequency_summary.time_frequency_concentration",
+                    description="Proporcion de energia concentrada en las celdas tiempo-frecuencia mas intensas.",
+                ),
+                _metric(
+                    key="frequency_centroid_timefreq_hz",
+                    label="Centroide tiempo-frecuencia",
+                    value=time_frequency.get("frequency_centroid_timefreq"),
+                    unit="Hz",
+                    source="analysis_engine.time_frequency_summary.frequency_centroid_timefreq",
+                    description="Centroide frecuencial derivado del resumen tiempo-frecuencia.",
+                ),
+                _metric(
+                    key="frequency_spread_timefreq_hz",
+                    label="Dispersion tiempo-frecuencia",
+                    value=time_frequency.get("frequency_spread_timefreq"),
+                    unit="Hz",
+                    source="analysis_engine.time_frequency_summary.frequency_spread_timefreq",
+                    description="Dispersion frecuencial derivada del resumen tiempo-frecuencia.",
+                ),
+                _metric(
+                    key="transient_index",
+                    label="Indice transitorio",
+                    value=time_frequency.get("transient_index"),
+                    source="analysis_engine.time_frequency_summary.transient_index",
+                    description="Variabilidad temporal de energia en el plano tiempo-frecuencia.",
+                ),
+                _metric(
+                    key="modulation_energy_mean",
+                    label="Modulacion energia media",
+                    value=modulation_summary.get("mean"),
+                    source="analysis_engine.time_frequency_summary.modulation_energy_summary.mean",
+                    description="Cambio medio de energia temporal dentro del resumen tiempo-frecuencia.",
+                ),
+                _metric(
+                    key="modulation_energy_std",
+                    label="Modulacion energia desviacion",
+                    value=modulation_summary.get("std"),
+                    source="analysis_engine.time_frequency_summary.modulation_energy_summary.std",
+                    description="Variabilidad del cambio de energia temporal.",
+                ),
+                _metric(
+                    key="modulation_energy_max",
+                    label="Modulacion energia maxima",
+                    value=modulation_summary.get("max"),
+                    source="analysis_engine.time_frequency_summary.modulation_energy_summary.max",
+                    description="Cambio maximo de energia temporal.",
+                ),
             ],
         ),
     ]
 
     return {
-        "schema_version": "1.0",
-        "policy": "canonical_analysis_engine_first",
-        "measurement_context": {
-            "max_audio_duration_seconds": quality.get("max_allowed_duration_seconds"),
-            "frame_duration_seconds": framing.get("frame_duration_seconds"),
-            "sample_rate_original_hz": quality.get("sample_rate_original"),
-            "sample_rate_analysis_hz": input_audio.get("internal_sample_rate") or quality.get("sample_rate_internal"),
-            "notes": [
-                "analysis_engine is the canonical source for audio metrics.",
-                "legacy temporal_analysis and spectral_analysis remain for compatibility and plots.",
-                "sample_rate_analysis_hz is the rate used for canonical calculations.",
-            ],
-        },
-        "groups": [group for group in groups if group["metrics"]],
+        "version_esquema": "1.0",
+        "politica": "metricas_canonicas_unificadas",
+        "grupos": [group for group in groups if group["metricas"]],
+    }
+
+
+def build_json_payload(
+    *,
+    result: object,
+    legacy_payload: dict[str, object],
+    analysis_engine_payload: dict[str, object],
+    filename: str | None,
+) -> dict[str, object]:
+    return {
+        "analysis_version": result.analysis_version,
+        "primary_visualization": result.primary_image.key,
+        "metricas": build_metricas(
+            legacy_payload=legacy_payload,
+            engine_payload=analysis_engine_payload,
+        ),
+        "plots": legacy_payload.get("plots", {}),
+        "content_type": "image/png",
+        "filename": f"{filename or 'analysis'}.png",
+        "image_base64": base64.b64encode(result.primary_image.image_bytes).decode("ascii"),
+        "encoding": "base64",
     }
 
 
@@ -590,7 +799,7 @@ async def create_audioanalisys(
         ) from exc
 
     if output == "json":
-        payload = serialize_result(result, include_images=True)
+        legacy_payload = serialize_result(result, include_images=True)
         analysis_engine_payload = run_analysis_engine(
             audio_input=contents,
             sample_rate=sample_rate,
@@ -601,15 +810,12 @@ async def create_audioanalisys(
             ),
             filename=audio_file.filename,
         )
-        payload["analysis_engine"] = analysis_engine_payload
-        payload["metrics"] = build_coherent_metrics(
-            legacy_payload=payload,
-            engine_payload=analysis_engine_payload,
+        payload = build_json_payload(
+            result=result,
+            legacy_payload=legacy_payload,
+            analysis_engine_payload=analysis_engine_payload,
+            filename=audio_file.filename,
         )
-        payload["content_type"] = "image/png"
-        payload["filename"] = f"{audio_file.filename or 'analysis'}.png"
-        payload["image_base64"] = base64.b64encode(result.primary_image.image_bytes).decode("ascii")
-        payload["encoding"] = "base64"
         return JSONResponse(payload)
 
     return Response(
