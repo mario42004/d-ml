@@ -74,6 +74,34 @@ function metricCard(title, description, value) {
   return article;
 }
 
+function metricRows(payload) {
+  return (payload.metricas?.grupos || []).flatMap((group) => group.metricas || []);
+}
+
+function metricMap(payload) {
+  return Object.fromEntries(metricRows(payload).map((metric) => [metric.clave, metric]));
+}
+
+function formatMetric(metric, digits = 4) {
+  if (!metric) {
+    return "n/a";
+  }
+
+  const value = typeof metric.valor === "number" ? formatNumber(metric.valor, digits) : metric.valor;
+  return metric.unidad ? `${value} ${metric.unidad}` : String(value);
+}
+
+function appendMetricCards(node, metrics, keys) {
+  keys.forEach((key) => {
+    const metric = metrics[key];
+    if (!metric) {
+      return;
+    }
+
+    node.append(metricCard(metric.etiqueta, metric.descripcion, formatMetric(metric)));
+  });
+}
+
 function plotCard(key, plot, isActive) {
   const article = document.createElement("article");
   article.className = `plot-card${isActive ? " is-active" : ""}`;
@@ -113,47 +141,47 @@ function setSpotlightPlot(key, plot) {
 }
 
 function populateMetadata(payload) {
-  const meta = payload.audio_metadata;
-  const config = payload.scalogram_config;
-
-  metadataNode.append(
-    metricCard("Frecuencia efectiva", "Frecuencia usada para el analisis.", `${meta.sample_rate} Hz`),
-    metricCard("Frecuencia original", "Frecuencia detectada antes del resample.", `${meta.original_sample_rate} Hz`),
-    metricCard("Duracion", "Duracion total del audio.", `${formatNumber(meta.duration_seconds, 3)} s`),
-    metricCard("Muestras", "Numero de muestras finalmente analizadas.", formatNumber(meta.sample_count, 0)),
-    metricCard("Nyquist", "Limite superior teorico del espectro.", `${formatNumber(meta.nyquist_hz, 0)} Hz`),
-    metricCard("Wavelet", "Configuracion guardada para comparabilidad.", `${config.wavelet} (${config.width_min}-${config.width_max})`)
-  );
+  const metrics = metricMap(payload);
+  appendMetricCards(metadataNode, metrics, [
+    "quality_flag",
+    "valid_audio",
+    "silence_sample_ratio",
+    "active_ratio",
+    "clipping_ratio",
+    "snr_estimate",
+  ]);
 }
 
 function populateTemporal(payload) {
-  const temporal = payload.temporal_analysis;
-
-  temporalNode.append(
-    metricCard("RMS media", "Energia media agregada del audio.", formatNumber(temporal.rms.mean, 5)),
-    metricCard("Pico de amplitud", "Maximo absoluto observado.", formatNumber(temporal.peak_amplitude, 5)),
-    metricCard("Silencio", "Fraccion del audio con amplitud muy baja.", `${formatNumber(temporal.silence_ratio * 100, 2)} %`),
-    metricCard("Rango dinamico", "Separacion entre zonas bajas y altas de energia.", `${formatNumber(temporal.dynamic_range_db, 2)} dB`),
-    metricCard("Crest factor", "Relacion entre picos y energia RMS.", formatNumber(temporal.crest_factor, 3)),
-    metricCard("Clipping", "Muestras cercanas al maximo digital.", `${formatNumber(temporal.clipping_ratio * 100, 3)} %`)
-  );
+  const metrics = metricMap(payload);
+  appendMetricCards(temporalNode, metrics, [
+    "rms_mean",
+    "rms_min",
+    "rms_max",
+    "peak_amplitude",
+    "dynamic_range_db",
+    "stability_index",
+    "variability_index",
+    "time_to_peak_seconds",
+    "silence_sample_ratio",
+    "clipping_ratio",
+  ]);
 }
 
 function populateSpectral(payload) {
-  const spectral = payload.spectral_analysis;
-  const topPeaks = spectral.top_spectral_peaks
-    .slice(0, 3)
-    .map((peak) => `${formatNumber(peak.frequency_hz, 1)} Hz`)
-    .join(", ");
-
-  spectralNode.append(
-    metricCard("Centroide", "Brillo espectral medio.", `${formatNumber(spectral.centroid_hz.mean, 1)} Hz`),
-    metricCard("Bandwidth", "Anchura media del contenido frecuencial.", `${formatNumber(spectral.bandwidth_hz.mean, 1)} Hz`),
-    metricCard("Rolloff", "Frecuencia bajo la que cae gran parte de la energia.", `${formatNumber(spectral.rolloff_hz.mean, 1)} Hz`),
-    metricCard("Flatness", "Cuanto se acerca el audio a ruido frente a tono.", formatNumber(spectral.flatness.mean, 5)),
-    metricCard("Frecuencia dominante", "Pico principal del espectro promedio.", `${formatNumber(spectral.dominant_frequency_hz, 1)} Hz`),
-    metricCard("Top picos", "Bandas mas relevantes para seguimiento historico.", topPeaks || "n/a")
-  );
+  const metrics = metricMap(payload);
+  appendMetricCards(spectralNode, metrics, [
+    "dominant_frequency_hz",
+    "spectral_centroid_mean_hz",
+    "spectral_bandwidth_mean_hz",
+    "spectral_rolloff_85_mean_hz",
+    "spectral_rolloff_95_mean_hz",
+    "spectral_flatness_mean",
+    "spectral_flux_mean",
+    "low_band_energy_ratio",
+    "mid_band_energy_ratio",
+    "high_band_energy_ratio",
+  ]);
 }
 
 function addInsight(text) {
@@ -163,28 +191,31 @@ function addInsight(text) {
 }
 
 function populateInsights(payload) {
-  const temporal = payload.temporal_analysis;
-  const spectral = payload.spectral_analysis;
+  const metrics = metricMap(payload);
+  const silenceRatio = metrics.silence_sample_ratio?.valor;
+  const clippingRatio = metrics.clipping_ratio?.valor;
+  const flatness = metrics.spectral_flatness_mean?.valor;
+  const dominantFrequency = metrics.dominant_frequency_hz?.valor;
 
-  if (temporal.silence_ratio >= 0.45) {
+  if (typeof silenceRatio === "number" && silenceRatio >= 0.45) {
     addInsight("El audio tiene bastante tiempo en silencio o con energia muy baja; conviene seguir este indicador en tendencias.");
   } else {
     addInsight("La señal mantiene actividad util durante buena parte del tiempo, lo que facilita comparaciones historicas.");
   }
 
-  if (temporal.clipping_ratio > 0) {
+  if (typeof clippingRatio === "number" && clippingRatio > 0) {
     addInsight("Hay indicios de clipping digital; esta captura puede distorsionar parte del analisis.");
   } else {
     addInsight("No aparecen signos relevantes de clipping, asi que la lectura espectral parece estable.");
   }
 
-  if (spectral.flatness.mean > 0.2) {
+  if (typeof flatness === "number" && flatness > 0.2) {
     addInsight("La textura espectral parece relativamente ruidosa o amplia; puede ser util vigilar cambios bruscos de flatness.");
   } else {
     addInsight("La energia esta bastante concentrada en bandas concretas, lo que sugiere un patron tonal o mecanico estable.");
   }
 
-  addInsight(`La frecuencia dominante ronda ${formatNumber(spectral.dominant_frequency_hz, 1)} Hz y sirve como referencia base para alarmas o drift.`);
+  addInsight(`La frecuencia dominante ronda ${formatNumber(dominantFrequency, 1)} Hz y sirve como referencia base para alarmas o drift.`);
 }
 
 function populatePlots(payload) {
@@ -201,13 +232,13 @@ function populatePlots(payload) {
 }
 
 function updateSummary(payload) {
-  const meta = payload.audio_metadata;
+  const metrics = metricMap(payload);
   const file = fileInput.files?.[0];
   summaryFileNode.textContent = file?.name || "Audio analizado";
-  summarySizeNode.textContent = formatBytes(file?.size || meta.file_size_bytes);
-  summaryDurationNode.textContent = `${formatNumber(meta.duration_seconds, 3)} s`;
-  summarySampleRateNode.textContent = `${meta.sample_rate} Hz`;
-  summaryDominantNode.textContent = `${formatNumber(payload.spectral_analysis.dominant_frequency_hz, 1)} Hz`;
+  summarySizeNode.textContent = formatBytes(file?.size || 0);
+  summaryDurationNode.textContent = formatMetric(metrics.silence_sample_ratio, 3);
+  summarySampleRateNode.textContent = "silencio";
+  summaryDominantNode.textContent = formatMetric(metrics.dominant_frequency_hz, 1);
   summaryVersionNode.textContent = `v${payload.analysis_version}`;
 }
 
