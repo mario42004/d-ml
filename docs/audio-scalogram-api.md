@@ -15,7 +15,8 @@ Recibir un archivo de audio y devolver un analisis reutilizable para inspeccion 
 ### Request
 
 - metodo: `POST`
-- ruta: `/scalogram`
+- ruta principal: `/audioanalisys`
+- alias temporal de compatibilidad: `/scalogram`
 - tipo: `multipart/form-data`
 - campo obligatorio: `audio_file`
 
@@ -37,6 +38,8 @@ Recibir un archivo de audio y devolver un analisis reutilizable para inspeccion 
   - metadatos de analisis
   - metricas temporales agregadas
   - metricas espectrales agregadas
+  - `analysis_engine` con metricas globales compactas de calidad, energia,
+    dinamica temporal, espectro, MFCC y tiempo-frecuencia opcional
   - imagen principal en `base64`
   - varias visualizaciones adicionales en `base64`
 
@@ -54,6 +57,7 @@ Recibir un archivo de audio y devolver un analisis reutilizable para inspeccion 
 - metadatos del audio: frecuencia original, frecuencia efectiva, duracion, numero de muestras, Nyquist y tamano de archivo
 - features temporales: RMS, zero crossing rate, amplitud, crest factor, rango dinamico, silencio, clipping y desplazamiento DC
 - features espectrales: centroide, bandwidth, rolloff, flatness, contraste, flujo espectral, frecuencia dominante y picos principales
+- `analysis_engine` procesa internamente frames de 5 segundos para audios de hasta 20 segundos, pero la respuesta normal expone metricas agregadas de todo el audio.
 
 ## Frontend
 
@@ -67,3 +71,10 @@ La propia API sirve una interfaz web ligera en `GET /` para:
 ## Despliegue
 
 Esta API se ejecuta en su propio contenedor Docker y no comparte runtime con el resto de APIs del proyecto.
+En produccion, nginx escucha en `443` y proxyfica hacia el contenedor en `8001`, por lo que los clientes externos deben usar:
+
+```text
+https://api.d-ml.eu/audioanalisys
+```
+
+El puerto `8001` queda como detalle interno del host/contenedor.

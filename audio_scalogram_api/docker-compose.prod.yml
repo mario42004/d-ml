@@ -1,0 +1,23 @@
+services:
+  audio-scalogram-api:
+    image: ${AUDIO_SCALOGRAM_IMAGE:-ghcr.io/mario42004/d-ml-audio-scalogram-api:latest}
+    container_name: audio-scalogram-api
+    expose:
+      - "8001"
+    environment:
+      APP_ENV: production
+      APP_PORT: 8001
+    restart: unless-stopped
+
+  audio-scalogram-proxy:
+    image: nginx:1.27-alpine
+    container_name: audio-scalogram-proxy
+    depends_on:
+      - audio-scalogram-api
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    restart: unless-stopped
