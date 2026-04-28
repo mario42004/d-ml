@@ -122,7 +122,8 @@ audio_scalogram_api/
     privkey.pem
 ```
 
-Arranque en produccion desde GHCR:
+Arranque en produccion desde GHCR, usando Nginx instalado en el host como
+proxy HTTPS externo hacia `127.0.0.1:8001`:
 
 ```bash
 docker compose -f docker-compose.prod.yml pull
@@ -141,7 +142,15 @@ Para fijar una version concreta publicada por GitHub Actions:
 AUDIO_SCALOGRAM_IMAGE=ghcr.io/mario42004/d-ml-audio-scalogram-api:sha-<commit>
 ```
 
-Entonces la API quedara expuesta en:
+Entonces la API quedara expuesta localmente en el servidor en:
+
+```text
+http://127.0.0.1:8001/
+http://127.0.0.1:8001/audioanalisys
+http://127.0.0.1:8001/health
+```
+
+Y Nginx del host debe publicar:
 
 ```text
 https://api.d-ml.eu/
