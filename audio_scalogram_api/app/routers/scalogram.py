@@ -759,6 +759,7 @@ async def create_audioanalisys(
     width_max: int | None = Form(default=None),
     colormap: str | None = Form(default=None),
     visualization: str = Form(default="dashboard"),
+    audio_description: str | None = Form(default=None),
     output: str = Form(default="image"),
 ):
     if output not in {"image", "json"}:
@@ -789,6 +790,7 @@ async def create_audioanalisys(
             width_max=width_max,
             colormap=colormap,
             visualization=visualization,
+            audio_description=audio_description,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

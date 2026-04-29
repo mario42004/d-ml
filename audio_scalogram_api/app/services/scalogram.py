@@ -21,6 +21,7 @@ EPSILON = 1e-10
 ANALYSIS_FRAME_LENGTH = 2048
 ANALYSIS_HOP_LENGTH = 512
 ANALYSIS_VERSION = "2.1"
+MAX_AUDIO_DESCRIPTION_LENGTH = 50
 
 
 @dataclass
@@ -130,6 +131,23 @@ class ScalogramResult:
     spectral_analysis: SpectralAnalysis
     autocorrelation_analysis: AutocorrelationAnalysis
     analysis_version: str
+
+
+def _normalize_audio_description(audio_description: str | None) -> str | None:
+    if audio_description is None:
+        return None
+
+    normalized = " ".join(str(audio_description).split())
+    if not normalized:
+        return None
+    return normalized[:MAX_AUDIO_DESCRIPTION_LENGTH]
+
+
+def _plot_title(base_title: str, audio_description: str | None) -> str:
+    normalized_description = _normalize_audio_description(audio_description)
+    if normalized_description is None:
+        return base_title
+    return f"{base_title}: {normalized_description}"
 
 
 def _summarize(values: np.ndarray) -> SummaryStats:
@@ -266,6 +284,7 @@ def _build_dashboard_plot(
     average_spectrum: np.ndarray,
     mel_db: np.ndarray,
     hop_length: int,
+    audio_description: str | None = None,
 ) -> PlotImage:
     figure, axes = plt.subplots(2, 2, figsize=(14, 8), dpi=160)
 
@@ -297,11 +316,12 @@ def _build_dashboard_plot(
     axes[1, 1].set_ylabel("Frequency (Hz)")
     figure.colorbar(mesh, ax=axes[1, 1], format="%+2.0f dB")
 
-    figure.suptitle("Audio Analysis Dashboard", fontsize=16)
+    title = _plot_title("Audio Analysis Dashboard", audio_description)
+    figure.suptitle(title, fontsize=16)
 
     return PlotImage(
         key="dashboard",
-        title="Analysis Dashboard",
+        title=title,
         description="Combined waveform, energy, average spectrum and mel spectrogram view.",
         media_type="image/png",
         image_bytes=_render_figure(figure),
@@ -312,6 +332,7 @@ def _build_autocorrelation_plot(
     lag_seconds: np.ndarray,
     autocorrelation: np.ndarray,
     peak_indices: list[int],
+    audio_description: str | None = None,
 ) -> PlotImage:
     figure, axis = plt.subplots(figsize=(12, 3.8), dpi=160)
     axis.plot(lag_seconds, autocorrelation, color="#8b5cf6", linewidth=1.2)
@@ -319,14 +340,15 @@ def _build_autocorrelation_plot(
         peak_x = lag_seconds[peak_indices]
         peak_y = autocorrelation[peak_indices]
         axis.scatter(peak_x, peak_y, color="#f97316", s=28, zorder=3)
-    axis.set_title("Autocorrelation")
+    title = _plot_title("Autocorrelation", audio_description)
+    axis.set_title(title)
     axis.set_xlabel("Lag (s)")
     axis.set_ylabel("Correlation")
     axis.set_xlim(0, float(lag_seconds[-1]) if len(lag_seconds) else 0)
     axis.grid(alpha=0.2)
     return PlotImage(
         key="autocorrelation",
-        title="Autocorrelation",
+        title=title,
         description="Self-similarity across lags, useful for periodicity and spacing between repeated patterns.",
         media_type="image/png",
         image_bytes=_render_figure(figure),
@@ -392,12 +414,14 @@ def build_scalogram(
     width_max: int | None = None,
     colormap: str | None = None,
     visualization: str = "dashboard",
+    audio_description: str | None = None,
 ) -> ScalogramResult:
     target_sample_rate = sample_rate or settings.default_sample_rate
     selected_wavelet = wavelet or settings.default_wavelet
     selected_width_min = width_min or settings.default_width_min
     selected_width_max = width_max or settings.default_width_max
     selected_colormap = colormap or settings.default_colormap
+    normalized_audio_description = _normalize_audio_description(audio_description)
 
     if selected_width_min < 1 or selected_width_max <= selected_width_min:
         raise ValueError("Invalid wavelet width range.")
@@ -545,6 +569,7 @@ def build_scalogram(
             average_spectrum,
             mel_db,
             ANALYSIS_HOP_LENGTH,
+            normalized_audio_description,
         ),
         "waveform": _build_waveform_plot(waveform, effective_sample_rate),
         "rms_energy": _build_rms_plot(rms_times, rms),
@@ -555,6 +580,7 @@ def build_scalogram(
             autocorrelation_seconds,
             autocorrelation,
             strongest_peak_indices,
+            normalized_audio_description,
         ),
     }
 
