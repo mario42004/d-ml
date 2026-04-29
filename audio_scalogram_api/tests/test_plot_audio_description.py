@@ -54,3 +54,26 @@ def test_dashboard_replaces_rms_panel_with_zoomed_envelope(monkeypatch) -> None:
     assert axes[1].get_xlabel() == "Time (s)"
     assert axes[1].get_ylabel() == "Amplitude"
     assert axes[1].get_xlim()[1] <= 1.6
+
+
+def test_dashboard_limits_average_spectrum_to_2500_hz(monkeypatch) -> None:
+    captured_figures = []
+
+    def capture_figure(figure):
+        captured_figures.append(figure)
+        return b"png-bytes"
+
+    monkeypatch.setattr(scalogram, "_render_figure", capture_figure)
+
+    scalogram._build_dashboard_plot(
+        **_dashboard_fixture(
+            sample_rate=8000,
+            spectrum_frequencies=np.linspace(0, 4000, 64),
+            average_spectrum=np.linspace(0.2, 0.8, 64),
+        )
+    )
+
+    assert captured_figures
+    spectrum_axis = captured_figures[0].axes[2]
+    assert spectrum_axis.get_title() == "Average Spectrum (0-2500 Hz)"
+    assert spectrum_axis.get_xlim()[1] == 2500
