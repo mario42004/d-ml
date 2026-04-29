@@ -314,8 +314,19 @@ def _build_dashboard_plot(
     axes[0, 1].legend(loc="upper right", fontsize=8)
     axes[0, 1].grid(alpha=0.2)
 
-    axes[1, 0].plot(spectrum_frequencies, average_spectrum, color="#1d4ed8", linewidth=1.0)
-    axes[1, 0].set_title("Average Spectrum")
+    spectrum_zoom_limit_hz = min(2500.0, float(sample_rate / 2))
+    spectrum_zoom_mask = spectrum_frequencies <= spectrum_zoom_limit_hz
+    if not np.any(spectrum_zoom_mask):
+        spectrum_zoom_mask = np.ones_like(spectrum_frequencies, dtype=bool)
+
+    axes[1, 0].plot(
+        spectrum_frequencies[spectrum_zoom_mask],
+        average_spectrum[spectrum_zoom_mask],
+        color="#1d4ed8",
+        linewidth=1.0,
+    )
+    axes[1, 0].set_xlim(0, spectrum_zoom_limit_hz)
+    axes[1, 0].set_title("Average Spectrum (0-2500 Hz)")
     axes[1, 0].set_xlabel("Frequency (Hz)")
     axes[1, 0].set_ylabel("Magnitude")
     axes[1, 0].grid(alpha=0.2)
