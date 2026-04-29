@@ -295,11 +295,23 @@ def _build_dashboard_plot(
     axes[0, 0].set_ylabel("Amplitude")
     axes[0, 0].grid(alpha=0.2)
 
-    axes[0, 1].plot(rms_times, rms, color="#b45309", linewidth=1.0)
-    axes[0, 1].fill_between(rms_times, rms, color="#f59e0b", alpha=0.25)
-    axes[0, 1].set_title("RMS Energy")
+    zoom_sample_count = min(len(waveform), max(1, int(sample_rate * 1.5)))
+    zoom_waveform = waveform[:zoom_sample_count]
+    zoom_times = np.arange(zoom_sample_count) / sample_rate
+    envelope = np.abs(zoom_waveform)
+    smoothing_window = max(1, int(sample_rate * 0.01))
+    if envelope.size >= smoothing_window > 1:
+        kernel = np.ones(smoothing_window, dtype=float) / smoothing_window
+        envelope = np.convolve(envelope, kernel, mode="same")
+
+    axes[0, 1].plot(zoom_times, zoom_waveform, color="#0f766e", linewidth=0.8, label="Signal")
+    axes[0, 1].plot(zoom_times, envelope, color="#f97316", linewidth=1.2, label="Envelope")
+    axes[0, 1].plot(zoom_times, -envelope, color="#f97316", linewidth=1.0, alpha=0.65)
+    axes[0, 1].fill_between(zoom_times, -envelope, envelope, color="#f97316", alpha=0.12)
+    axes[0, 1].set_title("Waveform Zoom + Envelope")
     axes[0, 1].set_xlabel("Time (s)")
-    axes[0, 1].set_ylabel("RMS")
+    axes[0, 1].set_ylabel("Amplitude")
+    axes[0, 1].legend(loc="upper right", fontsize=8)
     axes[0, 1].grid(alpha=0.2)
 
     axes[1, 0].plot(spectrum_frequencies, average_spectrum, color="#1d4ed8", linewidth=1.0)
@@ -322,7 +334,7 @@ def _build_dashboard_plot(
     return PlotImage(
         key="dashboard",
         title=title,
-        description="Combined waveform, energy, average spectrum and mel spectrogram view.",
+        description="Combined waveform, zoomed envelope, average spectrum and mel spectrogram view.",
         media_type="image/png",
         image_bytes=_render_figure(figure),
     )

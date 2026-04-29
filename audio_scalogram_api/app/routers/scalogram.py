@@ -143,7 +143,7 @@ def build_metricas(
                     value=quality.get("snr_estimate"),
                     unit="dB",
                     source="analysis_engine.quality.snr_estimate",
-                    description="Estimacion relativa de senal frente a piso de ruido.",
+                    description="SNR estimado.",
                 ),
                 _metric(
                     key="estimated_noise_floor",
