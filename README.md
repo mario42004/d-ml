@@ -1,9 +1,12 @@
 # d-ml
 
-API de analisis de audio de `d-ml`.
+APIs de analisis de `d-ml`.
 
-Este repositorio queda dedicado al servicio FastAPI dockerizado que publica el
-endpoint de analisis:
+Este repositorio contiene servicios FastAPI dockerizados e independientes.
+
+## Audio
+
+El servicio de audio publica:
 
 - `GET /health`
 - `POST /audioanalisys`
@@ -57,3 +60,21 @@ y proxy a la API en el puerto interno `8001`.
 ## Documentacion
 
 - [Audio Scalogram API](docs/audio-scalogram-api.md)
+
+## Sensores DATS
+
+El servicio de acelerometro/giroscopio vive aparte, sin dependencia de la API de audio:
+
+```text
+vibration_dats_api/
+```
+
+Publica:
+
+- `GET /health`
+- `POST /datsanalysis`
+- `POST /vibrationanalysis`
+
+Recibe archivos `.dat` en `multipart/form-data` con el campo `dat_file` y devuelve
+metricas globales y por ventanas de observacion de 500 ms para analizar vibraciones,
+cambios fuertes y futuros baselines de anomalias.

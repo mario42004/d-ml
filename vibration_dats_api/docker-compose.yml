@@ -1,0 +1,12 @@
+services:
+  vibration-dats-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vibration-dats-api
+    ports:
+      - "127.0.0.1:8002:8002"
+    environment:
+      APP_ENV: production
+      APP_PORT: 8002
+    restart: unless-stopped
