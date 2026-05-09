@@ -39,3 +39,24 @@ curl -X POST "http://localhost:8002/datsanalysis" \
   -F "dat_file=@../dats_examples/testings_dats/car_2909_20260509_130719.dat" \
   -F "window_ms=500"
 ```
+
+## Uso en produccion
+
+El despliegue de produccion usa la imagen publicada por GitHub Actions en GHCR:
+
+```bash
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
+```
+
+Por defecto expone la API solo en localhost para que Nginx la publique:
+
+- contenedor: `vibration-dats-api`
+- imagen: `ghcr.io/mario42004/d-ml-vibration-dats-api:latest`
+- puerto: `127.0.0.1:8002 -> 8002`
+
+Se puede fijar una imagen concreta sin editar el archivo:
+
+```bash
+VIBRATION_DATS_IMAGE=ghcr.io/mario42004/d-ml-vibration-dats-api:sha-xxxx docker compose -f docker-compose.prod.yml up -d
+```
