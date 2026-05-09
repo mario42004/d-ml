@@ -51,10 +51,23 @@ def test_analyzes_accelerometer_and_gyroscope_example() -> None:
     assert "gyroscope" in payload["capture"]["sensors"]
     assert payload["sensor_summaries"]["accelerometer"]["sample_count"] > 0
     assert payload["sensor_summaries"]["gyroscope"]["sample_count"] > 0
+    assert payload["sensor_summaries"]["accelerometer"]["dynamic"]["kurtosis"] is not None
+    assert payload["sensor_summaries"]["accelerometer"]["spectrum"]["spectral_centroid_hz"] is not None
+    assert payload["plots"]["accelerometer_timeseries"]["encoding"] == "base64"
     assert payload["windows"]
     first_window = payload["windows"][0]
     assert "accelerometer" in first_window["sensors"]
     assert "change_score" in first_window["sensors"]["accelerometer"]
+    metric_keys = [
+        metric["clave"]
+        for group in payload["metricas"]["grupos"]
+        for metric in group["metricas"]
+    ]
+    assert len(metric_keys) == len(set(metric_keys))
+    assert "accelerometer_dynamic_rms" in metric_keys
+    assert "gyroscope_dynamic_rms" in metric_keys
+    assert "accelerometer_dynamic_kurtosis" in metric_keys
+    assert "accelerometer_spectral_centroid_hz" in metric_keys
 
 
 def test_analyzes_accelerometer_only_example() -> None:

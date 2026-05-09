@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import base64
 import csv
 import io
 import math
 from dataclasses import dataclass
 from typing import Iterable
 
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 
 
@@ -83,9 +88,10 @@ def analyze_dats_bytes(
     }
     windows = _window_summaries(relative_series.values(), duration_seconds, window_seconds)
     _add_window_change_scores(windows)
+    plots = _build_plots(relative_series, windows)
 
     return {
-        "analysis_version": "1.0",
+        "analysis_version": "1.1",
         "file": {
             "filename": filename,
             "metadata": metadata,
@@ -103,6 +109,7 @@ def analyze_dats_bytes(
         "sensor_summaries": sensor_summaries,
         "windows": windows,
         "metricas": _build_metricas(sensor_summaries),
+        "plots": plots,
     }
 
 
@@ -186,15 +193,16 @@ def _sensor_summary(series: SensorSeries, *, window_seconds: float) -> dict[str,
     magnitude = _magnitude(series)
     dynamic = _dynamic_component(series.t, magnitude)
     fs = _estimated_sample_rate(series.t)
-    dominant = _dominant_frequency(series.t, dynamic)
+    spectrum = _spectral_summary(series.t, dynamic)
     jerk = _jerk(series.t, magnitude)
+    units = "m/s^2" if series.name == "accelerometer" else "rad/s"
 
     return {
         "sample_count": int(len(series.t)),
         "duration_seconds": _round(float(series.t[-1] - series.t[0])) if len(series.t) > 1 else 0.0,
         "estimated_sample_rate_hz": _round(fs),
         "accuracy_mode": _mode_int(series.accuracy),
-        "axis_units": "m/s^2" if series.name == "accelerometer" else "rad/s",
+        "axis_units": units,
         "window_seconds": window_seconds,
         "x": _stats(series.x),
         "y": _stats(series.y),
@@ -205,12 +213,25 @@ def _sensor_summary(series: SensorSeries, *, window_seconds: float) -> dict[str,
             "std": _round(float(np.std(dynamic))),
             "peak_abs": _round(float(np.max(np.abs(dynamic)))) if len(dynamic) else None,
             "peak_to_peak": _round(_peak_to_peak(dynamic)),
+            "mean_abs": _round(float(np.mean(np.abs(dynamic)))) if len(dynamic) else None,
+            "variance": _round(float(np.var(dynamic))) if len(dynamic) else None,
+            "skewness": _round(_skewness(dynamic)),
+            "kurtosis": _round(_kurtosis(dynamic)),
+            "crest_factor": _round(_crest_factor(dynamic)),
+            "shape_factor": _round(_shape_factor(dynamic)),
+            "impulse_factor": _round(_impulse_factor(dynamic)),
+            "clearance_factor": _round(_clearance_factor(dynamic)),
+            "zero_crossing_rate": _round(_zero_crossing_rate(dynamic)),
+            "energy": _round(float(np.sum(dynamic * dynamic))) if len(dynamic) else None,
+            "entropy": _round(_signal_entropy(dynamic)),
         },
         "jerk": {
             "rms": _round(_rms(jerk)),
             "max_abs": _round(float(np.max(np.abs(jerk)))) if len(jerk) else None,
+            "peak_to_peak": _round(_peak_to_peak(jerk)),
+            "crest_factor": _round(_crest_factor(jerk)),
         },
-        "spectrum": dominant,
+        "spectrum": spectrum,
     }
 
 
@@ -255,6 +276,7 @@ def _single_window_metrics(series: SensorSeries) -> dict[str, object]:
     magnitude = _magnitude(series)
     dynamic = magnitude - float(np.mean(magnitude))
     jerk = _jerk(series.t, magnitude)
+    spectrum = _spectral_summary(series.t, dynamic)
     return {
         "sample_count": int(len(series.t)),
         "estimated_sample_rate_hz": _round(_estimated_sample_rate(series.t)),
@@ -267,6 +289,13 @@ def _single_window_metrics(series: SensorSeries) -> dict[str, object]:
         "magnitude_peak_to_peak": _round(_peak_to_peak(magnitude)),
         "dynamic_rms": _round(_rms(dynamic)),
         "dynamic_peak_abs": _round(float(np.max(np.abs(dynamic)))),
+        "dynamic_kurtosis": _round(_kurtosis(dynamic)),
+        "dynamic_skewness": _round(_skewness(dynamic)),
+        "dynamic_crest_factor": _round(_crest_factor(dynamic)),
+        "dynamic_impulse_factor": _round(_impulse_factor(dynamic)),
+        "dynamic_shape_factor": _round(_shape_factor(dynamic)),
+        "dynamic_entropy": _round(_signal_entropy(dynamic)),
+        "zero_crossing_rate": _round(_zero_crossing_rate(dynamic)),
         "axis_peak_to_peak": {
             "x": _round(_peak_to_peak(series.x)),
             "y": _round(_peak_to_peak(series.y)),
@@ -274,7 +303,9 @@ def _single_window_metrics(series: SensorSeries) -> dict[str, object]:
         },
         "jerk_rms": _round(_rms(jerk)),
         "jerk_max_abs": _round(float(np.max(np.abs(jerk)))) if len(jerk) else None,
-        "dominant_frequency_hz": _dominant_frequency(series.t, dynamic)["frequency_hz"],
+        "dominant_frequency_hz": spectrum["dominant_frequency_hz"],
+        "spectral_centroid_hz": spectrum["spectral_centroid_hz"],
+        "spectral_entropy": spectrum["spectral_entropy"],
     }
 
 
@@ -298,6 +329,8 @@ def _add_window_change_scores(windows: list[dict[str, object]]) -> None:
                 sensor_payload.get("dynamic_peak_abs"),
                 sensor_payload.get("jerk_rms"),
                 sensor_payload.get("magnitude_peak_to_peak"),
+                sensor_payload.get("dynamic_crest_factor"),
+                sensor_payload.get("dynamic_kurtosis"),
             ]
             finite = [float(item) for item in score_input if isinstance(item, int | float) and math.isfinite(float(item))]
             if finite:
@@ -312,6 +345,109 @@ def _add_window_change_scores(windows: list[dict[str, object]]) -> None:
             payload["severity"] = _severity(score)
 
 
+def _build_plots(series_by_name: dict[str, SensorSeries], windows: list[dict[str, object]]) -> dict[str, object]:
+    plots: dict[str, object] = {}
+    for sensor, series in series_by_name.items():
+        magnitude = _magnitude(series)
+        dynamic = _dynamic_component(series.t, magnitude)
+        plots[f"{sensor}_timeseries"] = _plot_timeseries(sensor, series, magnitude)
+        plots[f"{sensor}_dynamic"] = _plot_dynamic(sensor, series.t, dynamic)
+        plots[f"{sensor}_spectrum"] = _plot_spectrum(sensor, series.t, dynamic)
+        plots[f"{sensor}_window_scores"] = _plot_window_scores(sensor, windows)
+    return plots
+
+
+def _plot_payload(title: str, image_bytes: bytes) -> dict[str, object]:
+    return {
+        "title": title,
+        "content_type": "image/png",
+        "encoding": "base64",
+        "image_base64": base64.b64encode(image_bytes).decode("ascii"),
+    }
+
+
+def _figure_to_png(fig: plt.Figure) -> bytes:
+    buffer = io.BytesIO()
+    fig.tight_layout()
+    fig.savefig(buffer, format="png", dpi=140)
+    plt.close(fig)
+    return buffer.getvalue()
+
+
+def _plot_timeseries(sensor: str, series: SensorSeries, magnitude: np.ndarray) -> dict[str, object]:
+    fig, axes = plt.subplots(2, 1, figsize=(11, 6), sharex=True)
+    axes[0].plot(series.t, series.x, linewidth=1.0, label="x")
+    axes[0].plot(series.t, series.y, linewidth=1.0, label="y")
+    axes[0].plot(series.t, series.z, linewidth=1.0, label="z")
+    axes[0].set_title(f"{sensor}: ejes")
+    axes[0].set_ylabel("valor")
+    axes[0].grid(True, alpha=0.25)
+    axes[0].legend(loc="upper right")
+
+    axes[1].plot(series.t, magnitude, color="black", linewidth=1.0)
+    axes[1].set_title("magnitud")
+    axes[1].set_xlabel("tiempo (s)")
+    axes[1].set_ylabel("|v|")
+    axes[1].grid(True, alpha=0.25)
+    return _plot_payload(f"{sensor} time series", _figure_to_png(fig))
+
+
+def _plot_dynamic(sensor: str, t: np.ndarray, dynamic: np.ndarray) -> dict[str, object]:
+    fig, ax = plt.subplots(figsize=(11, 4))
+    ax.plot(t, dynamic, color="#2563eb", linewidth=1.0)
+    ax.axhline(0, color="black", linewidth=0.8)
+    ax.set_title(f"{sensor}: componente dinamica")
+    ax.set_xlabel("tiempo (s)")
+    ax.set_ylabel("dinamica")
+    ax.grid(True, alpha=0.25)
+    return _plot_payload(f"{sensor} dynamic component", _figure_to_png(fig))
+
+
+def _plot_spectrum(sensor: str, t: np.ndarray, signal: np.ndarray) -> dict[str, object]:
+    fig, ax = plt.subplots(figsize=(11, 4))
+    fs = _estimated_sample_rate(t)
+    if fs > 0 and len(signal) >= 4:
+        centered = signal - float(np.mean(signal))
+        window = np.hanning(len(centered))
+        spectrum = np.fft.rfft(centered * window)
+        freqs = np.fft.rfftfreq(len(centered), d=1.0 / fs)
+        amp = np.abs(spectrum) * 2.0 / max(float(np.sum(window)), 1.0)
+        keep = (freqs > 0.2) & (freqs <= min(60.0, fs / 2.0))
+        ax.plot(freqs[keep], amp[keep], color="#7c3aed", linewidth=1.0)
+    ax.set_title(f"{sensor}: espectro dinamico")
+    ax.set_xlabel("frecuencia (Hz)")
+    ax.set_ylabel("amplitud")
+    ax.grid(True, alpha=0.25)
+    return _plot_payload(f"{sensor} spectrum", _figure_to_png(fig))
+
+
+def _plot_window_scores(sensor: str, windows: list[dict[str, object]]) -> dict[str, object]:
+    centers = []
+    scores = []
+    rms_values = []
+    for window in windows:
+        payload = window.get("sensors", {}).get(sensor) if isinstance(window.get("sensors"), dict) else None
+        if not isinstance(payload, dict):
+            continue
+        start = float(window.get("start_seconds") or 0.0)
+        end = float(window.get("end_seconds") or start)
+        centers.append((start + end) / 2.0)
+        scores.append(float(payload.get("change_score") or 0.0))
+        rms_values.append(float(payload.get("dynamic_rms") or 0.0))
+
+    fig, ax = plt.subplots(figsize=(11, 4))
+    if centers:
+        ax.plot(centers, scores, color="#dc2626", linewidth=1.4, label="change score")
+        ax.plot(centers, rms_values, color="#059669", linewidth=1.0, alpha=0.8, label="dynamic RMS")
+        ax.axhline(3.5, color="#dc2626", linestyle="--", linewidth=0.8)
+        ax.legend(loc="upper right")
+    ax.set_title(f"{sensor}: ventanas de observacion")
+    ax.set_xlabel("tiempo (s)")
+    ax.set_ylabel("score")
+    ax.grid(True, alpha=0.25)
+    return _plot_payload(f"{sensor} window scores", _figure_to_png(fig))
+
+
 def _build_metricas(sensor_summaries: dict[str, dict[str, object]]) -> dict[str, object]:
     groups = []
     for sensor, summary in sensor_summaries.items():
@@ -319,54 +455,39 @@ def _build_metricas(sensor_summaries: dict[str, dict[str, object]]) -> dict[str,
         jerk = summary.get("jerk") if isinstance(summary.get("jerk"), dict) else {}
         spectrum = summary.get("spectrum") if isinstance(summary.get("spectrum"), dict) else {}
         magnitude = summary.get("magnitude") if isinstance(summary.get("magnitude"), dict) else {}
+        units = str(summary.get("axis_units") or "")
         groups.append(
             {
                 "clave": sensor,
                 "etiqueta": "Acelerometro" if sensor == "accelerometer" else "Giroscopio",
                 "metricas": [
-                    _metric("sample_count", "Muestras", summary.get("sample_count"), "", f"sensor_summaries.{sensor}.sample_count"),
-                    _metric(
-                        "estimated_sample_rate_hz",
-                        "Frecuencia estimada",
-                        summary.get("estimated_sample_rate_hz"),
-                        "Hz",
-                        f"sensor_summaries.{sensor}.estimated_sample_rate_hz",
-                    ),
-                    _metric(
-                        "magnitude_mean",
-                        "Magnitud media",
-                        magnitude.get("mean"),
-                        str(summary.get("axis_units") or ""),
-                        f"sensor_summaries.{sensor}.magnitude.mean",
-                    ),
-                    _metric(
-                        "dynamic_rms",
-                        "RMS dinamico",
-                        dynamic.get("rms"),
-                        str(summary.get("axis_units") or ""),
-                        f"sensor_summaries.{sensor}.dynamic.rms",
-                    ),
-                    _metric(
-                        "dynamic_peak_abs",
-                        "Pico dinamico absoluto",
-                        dynamic.get("peak_abs"),
-                        str(summary.get("axis_units") or ""),
-                        f"sensor_summaries.{sensor}.dynamic.peak_abs",
-                    ),
-                    _metric(
-                        "jerk_rms",
-                        "Jerk RMS",
-                        jerk.get("rms"),
-                        f"{summary.get('axis_units')}/s",
-                        f"sensor_summaries.{sensor}.jerk.rms",
-                    ),
-                    _metric(
-                        "dominant_frequency_hz",
-                        "Frecuencia dominante",
-                        spectrum.get("frequency_hz"),
-                        "Hz",
-                        f"sensor_summaries.{sensor}.spectrum.frequency_hz",
-                    ),
+                    _sensor_metric(sensor, "sample_count", "Muestras", summary.get("sample_count"), "", f"sensor_summaries.{sensor}.sample_count"),
+                    _sensor_metric(sensor, "estimated_sample_rate_hz", "Frecuencia estimada", summary.get("estimated_sample_rate_hz"), "Hz", f"sensor_summaries.{sensor}.estimated_sample_rate_hz"),
+                    _sensor_metric(sensor, "magnitude_mean", "Magnitud media", magnitude.get("mean"), units, f"sensor_summaries.{sensor}.magnitude.mean"),
+                    _sensor_metric(sensor, "magnitude_std", "Desviacion de magnitud", magnitude.get("std"), units, f"sensor_summaries.{sensor}.magnitude.std"),
+                    _sensor_metric(sensor, "magnitude_peak_to_peak", "Pico a pico de magnitud", magnitude.get("peak_to_peak"), units, f"sensor_summaries.{sensor}.magnitude.peak_to_peak"),
+                    _sensor_metric(sensor, "dynamic_rms", "RMS dinamico", dynamic.get("rms"), units, f"sensor_summaries.{sensor}.dynamic.rms"),
+                    _sensor_metric(sensor, "dynamic_peak_abs", "Pico dinamico absoluto", dynamic.get("peak_abs"), units, f"sensor_summaries.{sensor}.dynamic.peak_abs"),
+                    _sensor_metric(sensor, "dynamic_peak_to_peak", "Pico a pico dinamico", dynamic.get("peak_to_peak"), units, f"sensor_summaries.{sensor}.dynamic.peak_to_peak"),
+                    _sensor_metric(sensor, "dynamic_kurtosis", "Kurtosis dinamica", dynamic.get("kurtosis"), "", f"sensor_summaries.{sensor}.dynamic.kurtosis"),
+                    _sensor_metric(sensor, "dynamic_skewness", "Skewness dinamica", dynamic.get("skewness"), "", f"sensor_summaries.{sensor}.dynamic.skewness"),
+                    _sensor_metric(sensor, "dynamic_crest_factor", "Crest factor dinamico", dynamic.get("crest_factor"), "", f"sensor_summaries.{sensor}.dynamic.crest_factor"),
+                    _sensor_metric(sensor, "dynamic_shape_factor", "Shape factor dinamico", dynamic.get("shape_factor"), "", f"sensor_summaries.{sensor}.dynamic.shape_factor"),
+                    _sensor_metric(sensor, "dynamic_impulse_factor", "Impulse factor dinamico", dynamic.get("impulse_factor"), "", f"sensor_summaries.{sensor}.dynamic.impulse_factor"),
+                    _sensor_metric(sensor, "dynamic_clearance_factor", "Clearance factor dinamico", dynamic.get("clearance_factor"), "", f"sensor_summaries.{sensor}.dynamic.clearance_factor"),
+                    _sensor_metric(sensor, "dynamic_zero_crossing_rate", "Cruces por cero dinamicos", dynamic.get("zero_crossing_rate"), "ratio", f"sensor_summaries.{sensor}.dynamic.zero_crossing_rate"),
+                    _sensor_metric(sensor, "dynamic_entropy", "Entropia dinamica", dynamic.get("entropy"), "", f"sensor_summaries.{sensor}.dynamic.entropy"),
+                    _sensor_metric(sensor, "jerk_rms", "Jerk RMS", jerk.get("rms"), f"{units}/s", f"sensor_summaries.{sensor}.jerk.rms"),
+                    _sensor_metric(sensor, "jerk_max_abs", "Jerk maximo absoluto", jerk.get("max_abs"), f"{units}/s", f"sensor_summaries.{sensor}.jerk.max_abs"),
+                    _sensor_metric(sensor, "dominant_frequency_hz", "Frecuencia dominante", spectrum.get("dominant_frequency_hz"), "Hz", f"sensor_summaries.{sensor}.spectrum.dominant_frequency_hz"),
+                    _sensor_metric(sensor, "dominant_amplitude", "Amplitud dominante", spectrum.get("dominant_amplitude"), units, f"sensor_summaries.{sensor}.spectrum.dominant_amplitude"),
+                    _sensor_metric(sensor, "spectral_centroid_hz", "Centroide espectral", spectrum.get("spectral_centroid_hz"), "Hz", f"sensor_summaries.{sensor}.spectrum.spectral_centroid_hz"),
+                    _sensor_metric(sensor, "spectral_bandwidth_hz", "Bandwidth espectral", spectrum.get("spectral_bandwidth_hz"), "Hz", f"sensor_summaries.{sensor}.spectrum.spectral_bandwidth_hz"),
+                    _sensor_metric(sensor, "spectral_flatness", "Flatness espectral", spectrum.get("spectral_flatness"), "", f"sensor_summaries.{sensor}.spectrum.spectral_flatness"),
+                    _sensor_metric(sensor, "spectral_entropy", "Entropia espectral", spectrum.get("spectral_entropy"), "", f"sensor_summaries.{sensor}.spectrum.spectral_entropy"),
+                    _sensor_metric(sensor, "band_power_low", "Energia banda baja", (spectrum.get("band_powers") or {}).get("low_0_5_hz"), "power", f"sensor_summaries.{sensor}.spectrum.band_powers.low_0_5_hz"),
+                    _sensor_metric(sensor, "band_power_mid", "Energia banda media", (spectrum.get("band_powers") or {}).get("mid_5_20_hz"), "power", f"sensor_summaries.{sensor}.spectrum.band_powers.mid_5_20_hz"),
+                    _sensor_metric(sensor, "band_power_high", "Energia banda alta", (spectrum.get("band_powers") or {}).get("high_20_60_hz"), "power", f"sensor_summaries.{sensor}.spectrum.band_powers.high_20_60_hz"),
                 ],
             }
         )
@@ -375,6 +496,10 @@ def _build_metricas(sensor_summaries: dict[str, dict[str, object]]) -> dict[str,
         "politica": "metricas_ventanas_500ms_para_baseline_anomalias",
         "grupos": groups,
     }
+
+
+def _sensor_metric(sensor: str, key: str, label: str, value: object, unit: str, source: str) -> dict[str, object]:
+    return _metric(f"{sensor}_{key}", label, value, unit, source)
 
 
 def _metric(key: str, label: str, value: object, unit: str, source: str) -> dict[str, object]:
@@ -417,25 +542,76 @@ def _estimated_sample_rate(t: np.ndarray) -> float:
     return float(1.0 / np.median(dt))
 
 
-def _dominant_frequency(t: np.ndarray, signal: np.ndarray) -> dict[str, object]:
+def _spectral_summary(t: np.ndarray, signal: np.ndarray) -> dict[str, object]:
     if len(signal) < 4:
-        return {"frequency_hz": None, "amplitude": None}
+        return _empty_spectrum()
     fs = _estimated_sample_rate(t)
     if fs <= 0:
-        return {"frequency_hz": None, "amplitude": None}
+        return _empty_spectrum()
     centered = signal - float(np.mean(signal))
     window = np.hanning(len(centered))
     spectrum = np.fft.rfft(centered * window)
     freqs = np.fft.rfftfreq(len(centered), d=1.0 / fs)
     amp = np.abs(spectrum) * 2.0 / max(float(np.sum(window)), 1.0)
+    power = amp * amp
     valid = (freqs > 0.2) & (freqs <= fs / 2.0)
     if not np.any(valid):
-        return {"frequency_hz": None, "amplitude": None}
-    index = int(np.argmax(amp[valid]))
+        return _empty_spectrum()
+
+    valid_freqs = freqs[valid]
+    valid_amp = amp[valid]
+    valid_power = power[valid]
+    total_power = float(np.sum(valid_power))
+    if total_power <= 1e-18:
+        return _empty_spectrum()
+
+    peak_index = int(np.argmax(valid_amp))
+    centroid = float(np.sum(valid_freqs * valid_power) / total_power)
+    bandwidth = float(np.sqrt(np.sum(((valid_freqs - centroid) ** 2) * valid_power) / total_power))
+    normalized_power = valid_power / total_power
+    entropy = float(-np.sum(normalized_power * np.log2(normalized_power + 1e-18)) / math.log2(len(normalized_power))) if len(normalized_power) > 1 else 0.0
+    flatness = float(np.exp(np.mean(np.log(valid_power + 1e-18))) / (np.mean(valid_power) + 1e-18))
+
     return {
-        "frequency_hz": _round(float(freqs[valid][index])),
-        "amplitude": _round(float(amp[valid][index])),
+        "dominant_frequency_hz": _round(float(valid_freqs[peak_index])),
+        "dominant_amplitude": _round(float(valid_amp[peak_index])),
+        "spectral_centroid_hz": _round(centroid),
+        "spectral_bandwidth_hz": _round(bandwidth),
+        "spectral_flatness": _round(flatness),
+        "spectral_entropy": _round(entropy),
+        "total_power": _round(total_power),
+        "band_powers": {
+            "low_0_5_hz": _round(_band_power(valid_freqs, valid_power, 0.2, 5.0)),
+            "mid_5_20_hz": _round(_band_power(valid_freqs, valid_power, 5.0, 20.0)),
+            "high_20_60_hz": _round(_band_power(valid_freqs, valid_power, 20.0, min(60.0, fs / 2.0))),
+        },
     }
+
+
+def _empty_spectrum() -> dict[str, object]:
+    return {
+        "dominant_frequency_hz": None,
+        "dominant_amplitude": None,
+        "spectral_centroid_hz": None,
+        "spectral_bandwidth_hz": None,
+        "spectral_flatness": None,
+        "spectral_entropy": None,
+        "total_power": None,
+        "band_powers": {
+            "low_0_5_hz": None,
+            "mid_5_20_hz": None,
+            "high_20_60_hz": None,
+        },
+    }
+
+
+def _band_power(freqs: np.ndarray, power: np.ndarray, low: float, high: float) -> float:
+    if high <= low:
+        return 0.0
+    mask = (freqs >= low) & (freqs < high)
+    if not np.any(mask):
+        return 0.0
+    return float(np.sum(power[mask]))
 
 
 def _stats(values: np.ndarray) -> dict[str, object]:
@@ -448,6 +624,9 @@ def _stats(values: np.ndarray) -> dict[str, object]:
         "min": _round(float(np.min(values))),
         "max": _round(float(np.max(values))),
         "peak_to_peak": _round(_peak_to_peak(values)),
+        "skewness": _round(_skewness(values)),
+        "kurtosis": _round(_kurtosis(values)),
+        "crest_factor": _round(_crest_factor(values)),
     }
 
 
@@ -461,6 +640,77 @@ def _peak_to_peak(values: np.ndarray) -> float:
     if len(values) == 0:
         return 0.0
     return float(np.max(values) - np.min(values))
+
+
+def _skewness(values: np.ndarray) -> float | None:
+    if len(values) < 2:
+        return None
+    centered = values - float(np.mean(values))
+    std = float(np.std(values))
+    if std <= 1e-18:
+        return 0.0
+    return float(np.mean((centered / std) ** 3))
+
+
+def _kurtosis(values: np.ndarray) -> float | None:
+    if len(values) < 2:
+        return None
+    centered = values - float(np.mean(values))
+    std = float(np.std(values))
+    if std <= 1e-18:
+        return 0.0
+    return float(np.mean((centered / std) ** 4))
+
+
+def _crest_factor(values: np.ndarray) -> float | None:
+    rms = _rms(values)
+    if rms <= 1e-18:
+        return None
+    return float(np.max(np.abs(values)) / rms)
+
+
+def _shape_factor(values: np.ndarray) -> float | None:
+    mean_abs = float(np.mean(np.abs(values))) if len(values) else 0.0
+    if mean_abs <= 1e-18:
+        return None
+    return float(_rms(values) / mean_abs)
+
+
+def _impulse_factor(values: np.ndarray) -> float | None:
+    mean_abs = float(np.mean(np.abs(values))) if len(values) else 0.0
+    if mean_abs <= 1e-18:
+        return None
+    return float(np.max(np.abs(values)) / mean_abs)
+
+
+def _clearance_factor(values: np.ndarray) -> float | None:
+    if len(values) == 0:
+        return None
+    denominator = float(np.mean(np.sqrt(np.abs(values))) ** 2)
+    if denominator <= 1e-18:
+        return None
+    return float(np.max(np.abs(values)) / denominator)
+
+
+def _zero_crossing_rate(values: np.ndarray) -> float | None:
+    if len(values) < 2:
+        return None
+    signs = np.signbit(values)
+    return float(np.mean(signs[1:] != signs[:-1]))
+
+
+def _signal_entropy(values: np.ndarray, bins: int = 32) -> float | None:
+    if len(values) < 2:
+        return None
+    hist, _ = np.histogram(values, bins=bins)
+    total = float(np.sum(hist))
+    if total <= 0:
+        return None
+    probabilities = hist.astype(np.float64) / total
+    probabilities = probabilities[probabilities > 0]
+    if len(probabilities) <= 1:
+        return 0.0
+    return float(-np.sum(probabilities * np.log2(probabilities)) / math.log2(bins))
 
 
 def _robust_scores(values: np.ndarray) -> np.ndarray:
